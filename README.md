@@ -57,4 +57,4 @@ SAM will ask for the name of the application (name it something relevant such as
 9. Agents enabled for tasks working on the associated Queue will receive tweets in the form of tasks. After accepting the task, the agent can reply back to Tweets using the TwitterReply quick connect to transfer the task. Information entered as part of the description will be posted on the Tweet being replied to.
 
 ## Resource deletion
-1. Back on the cloudformation console, select the stack and click on Delete and confirm it by pressing Delete Stack. 
+1. From the cloudformation console, select the stack and click on Delete and confirm it by pressing Delete Stack. 
