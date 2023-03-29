@@ -92,8 +92,7 @@ Resources:
                   - comprehend:DetectSentiment
                   - comprehend:DetectDominantLanguage
                 Resource: 
-                  - '*'
-                  
+                  - '*'               
   TwitterListenerRole:
     Type: AWS::IAM::Role
     Properties:
@@ -151,12 +150,11 @@ Resources:
       Roles: 
         - !Ref TwitterListenerRole
 
-  
   ConnectTwitterConfig:
     Type: AWS::SecretsManager::Secret
     Properties: 
-      Name: ConnectTwitterConfig
-      SecretString: !Sub '{"CONNECT_INSTANCE_ID":"Replace with instance ID data","CONTACT_FLOW_ID":"Replace with contact flow ID data", "TWITTER_ACCESS_TOKEN":"Replace with Twitter Access Token","TWITTER_ACCESS_TOKEN_SECRET":"Replace with Twitter Access Token","TWITTER_CONSUMER_KEY":"Replace with Twitter Consumer Key","TWITTER_CONSUMER_SECRET":"Replace with Twitter Consumer Secret","KINESIS_STREAM": "${ConnectTwitterStream}","TWITTER_TOPIC":"Replace with Twitter hashtag of interest"}'
+      Name: !Join ['-', ['ConnectTwitter', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]]]
+      SecretString: !Sub '{"CONNECT_INSTANCE_ID":"Replace with instance ID data","CONTACT_FLOW_ID":"Replace with contact flow ID data", "TWITTER_ACCESS_TOKEN":"Replace with Twitter Access Token","TWITTER_ACCESS_TOKEN_SECRET":"Replace with Twitter Access Token","TWITTER_CONSUMER_KEY":"Replace with Twitter Consumer Key","TWITTER_CONSUMER_SECRET":"Replace with Twitter Consumer Secret","KINESIS_STREAM": "${ConnectTwitterStream}","TWITTER_TOPIC":"Replace with Twitter hashtag of interest","TWITTER_BEARER_TOKEN":"Replace with Twitter Bearer Token"}'
       Tags:
         -
           Key: AppName
@@ -180,6 +178,8 @@ Resources:
       Environment: 
         Variables:
           CONNECT_TWITTER_CONFIG: !Ref ConnectTwitterConfig
+      Layers:
+        - !Ref TweepyLayer
   
   StreamProcessorMapping:
     Type: AWS::Lambda::EventSourceMapping
@@ -188,6 +188,18 @@ Resources:
         EventSourceArn: !GetAtt ConnectTwitterStream.Arn
         FunctionName: !Ref StreamProcessor
         StartingPosition: 'LATEST'
+  TweepyLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      ContentUri: twitter-layer/
+      CompatibleRuntimes:
+        - python3.6
+        - python3.7
+        - python3.8
+        - python3.9
+    Metadata:
+      BuildMethod: python3.8
+
   
   TwitterReplier:
     Type: AWS::Serverless::Function
@@ -198,6 +210,8 @@ Resources:
       Environment:
         Variables:
           CONNECT_TWITTER_CONFIG: !Ref ConnectTwitterConfig
+      Layers:
+        - !Ref TweepyLayer
           
   TwitterListener:
     Type: 'AWS::EC2::Instance'
@@ -212,6 +226,7 @@ Resources:
             - '-'
             - - !Ref 'AWS::StackName'
               - TwitterListener
+
 
       UserData: !Base64 
         'Fn::Join':
@@ -233,12 +248,16 @@ Resources:
             - |
               echo "import json" >> twitter-streamer.py
             - |
+              echo "import time" >> twitter-streamer.py
+            - |
               echo "from botocore.exceptions import ClientError" >> twitter-streamer.py
             - !Sub 'echo "REGION="\""${AWS::Region}"\""" >> twitter-streamer.py'
             - |
               echo "  " >> twitter-streamer.py
             - |
               echo "client = boto3.client(service_name='secretsmanager',region_name=REGION)" >> twitter-streamer.py
+            - |
+              echo "logGroup='/aws/ec2/twitter-listener'" >> twitter-streamer.py
             - |
               echo "try:" >> twitter-streamer.py
             - !Sub 'echo "  get_secret_value_response = client.get_secret_value(SecretId="\""${ConnectTwitterConfig}"\"")" >> twitter-streamer.py'
@@ -253,41 +272,101 @@ Resources:
             - |
               echo "  STREAM_CONFIG = json.loads(get_secret_value_response['SecretString'])" >> twitter-streamer.py
             - |
-              echo "  access_token = STREAM_CONFIG['TWITTER_ACCESS_TOKEN']" >> twitter-streamer.py
-            - |
-              echo "  access_token_secret = STREAM_CONFIG['TWITTER_ACCESS_TOKEN_SECRET']" >> twitter-streamer.py
-            - |
-              echo "  consumer_key = STREAM_CONFIG['TWITTER_CONSUMER_KEY']" >> twitter-streamer.py
-            - |
-              echo "  consumer_secret = STREAM_CONFIG['TWITTER_CONSUMER_SECRET']" >> twitter-streamer.py
+              echo "  BEARER_TOKEN = STREAM_CONFIG['TWITTER_BEARER_TOKEN']" >> twitter-streamer.py
             - |
               echo "  topic = STREAM_CONFIG['TWITTER_TOPIC']" >> twitter-streamer.py
             - |
               echo "  kinesis_stream =STREAM_CONFIG['KINESIS_STREAM']" >> twitter-streamer.py
             - |
-              echo "  trackedTopic =[topic]" >> twitter-streamer.py
-            - |
               echo "  kinesis_client = boto3.client('kinesis',region_name=REGION)" >> twitter-streamer.py
             - |
-              echo "  class TwitListener(tweepy.Stream):" >> twitter-streamer.py
+              echo "  cw_logs = boto3.client('logs',region_name=REGION)" >> twitter-streamer.py
+            - |
+              echo "  try:" >> twitter-streamer.py
+            - |
+              echo "    cw_logs.create_log_group(logGroupName=logGroup)" >> twitter-streamer.py
+            - |
+              echo "  except ClientError as e:" >> twitter-streamer.py
+            - |
+              echo "    print('Error creating CW Log group')" >> twitter-streamer.py
+            - |
+              echo "    print(e)" >> twitter-streamer.py
+            - |
+              echo "  logStream = 'Stream'+str(int(time.time()*1000))" >> twitter-streamer.py
+            - |
+              echo "  try:" >> twitter-streamer.py
+            - |
+              echo "      print(cw_logs.create_log_stream(logGroupName=logGroup,logStreamName=logStream))" >> twitter-streamer.py
+            - |
+              echo "  except ClientError as e:" >> twitter-streamer.py
+            - |
+              echo "    print('Error creating CW Log stream')" >> twitter-streamer.py
+            - |
+              echo "  else:" >> twitter-streamer.py
+            - |
+              echo "    cw_response = cw_logs.put_log_events(logGroupName=logGroup,logStreamName=logStream,logEvents=[{'timestamp': int(time.time()*1000),'message': 'Starting'}])" >> twitter-streamer.py
+            - |
+              echo "  class TwitListener(tweepy.StreamingClient):" >> twitter-streamer.py
             - |
               echo "    def on_data(self, data):" >> twitter-streamer.py
             - |
-              echo "      parsedData={'tweet_id': json.loads(data)['id'],'text': json.loads(data)['text'],'user_id':json.loads(data)['user']['id'],'name': json.loads(data)['user']['name'],'screen_name': json.loads(data)['user']['screen_name']}" >> twitter-streamer.py
+              echo "      jsonData = json.loads(data)" >> twitter-streamer.py
             - |
-              echo "      print(parsedData)" >> twitter-streamer.py
+              echo "      parsedData={'tweet_id': jsonData['data']['id'],'text': jsonData['data']['text'],'lang':jsonData['data']['lang'],'user_id':jsonData['data']['author_id']}" >> twitter-streamer.py
             - |
-              echo "      kinesis_client.put_record(StreamName=kinesis_stream,PartitionKey=topic,Data = json.dumps(parsedData))" >> twitter-streamer.py
+              echo "      logs=cw_logs.describe_log_streams(logGroupName=logGroup,orderBy='LastEventTime',descending=True,limit=1)" >> twitter-streamer.py
+            - |
+              echo "      logsToken = logs['logStreams'][0]['uploadSequenceToken']" >> twitter-streamer.py
+            - |
+              echo "      cw_response = cw_logs.put_log_events(logGroupName=logGroup,logStreamName=logStream,logEvents=[{'timestamp': int(time.time()*1000),'message': json.dumps(parsedData)}],sequenceToken=logsToken)" >> twitter-streamer.py
+            - |
+              echo "      kin_response=kinesis_client.put_record(StreamName=kinesis_stream,PartitionKey=topic,Data = json.dumps(parsedData))" >> twitter-streamer.py
+            - |
+              echo "      cw_logs.put_log_events(logGroupName=logGroup,logStreamName=logStream,logEvents=[{'timestamp': int(time.time()*1000),'message': json.dumps(kin_response)}],sequenceToken=logsToken)" >> twitter-streamer.py
+            - |
+              echo "      time.sleep(10)" >> twitter-streamer.py
             - |
               echo "      return True" >> twitter-streamer.py
             - |
               echo "    def on_error(self, status):" >> twitter-streamer.py
             - |
-              echo "      print(status)" >> twitter-streamer.py
+              echo "      print('Error received:' + str(status))" >> twitter-streamer.py
             - |
-              echo "  feedStream = TwitListener(consumer_key, consumer_secret,access_token, access_token_secret)" >> twitter-streamer.py
+              echo "      logs=cw_logs.describe_log_streams(logGroupName=logGroup,orderBy='LastEventTime',descending=True,limit=1)" >> twitter-streamer.py
             - |
-              echo "  feedStream.filter(track=trackedTopic)" >> twitter-streamer.py
+              echo "      logsToken = logs['logStreams'][0]['uploadSequenceToken']" >> twitter-streamer.py
+            - |
+              echo "      cw_response = cw_logs.put_log_events(logGroupName=logGroup,logStreamName=logStream,logEvents=[{'timestamp': int(time.time()*1000),'message': status}],sequenceToken=logsToken)" >> twitter-streamer.py
+            - |
+              echo "      return True" >> twitter-streamer.py
+            - |
+              echo "    def on_limit(track):" >> twitter-streamer.py
+            - |
+              echo "      logs=cw_logs.describe_log_streams(logGroupName=logGroup,orderBy='LastEventTime',descending=True,limit=1)" >> twitter-streamer.py
+            - |
+              echo "      logsToken = logs['logStreams'][0]['uploadSequenceToken']" >> twitter-streamer.py
+            - |
+              echo "      cw_response = cw_logs.put_log_events(logGroupName=logGroup,logStreamName=logStream,logEvents=[{'timestamp': int(time.time()*1000),'message': track}],sequenceToken=logsToken)" >> twitter-streamer.py
+            - |
+              echo "      time.sleep(60)" >> twitter-streamer.py
+            - |
+              echo "      return True" >> twitter-streamer.py
+            - |
+              echo "    def on_disconnect_message(message):" >> twitter-streamer.py
+            - |
+              echo "      logs=cw_logs.describe_log_streams(logGroupName=logGroup,orderBy='LastEventTime',descending=True,limit=1)" >> twitter-streamer.py
+            - |
+              echo "      logsToken = logs['logStreams'][0]['uploadSequenceToken']" >> twitter-streamer.py
+            - |
+              echo "      cw_response = cw_logs.put_log_events(logGroupName=logGroup,logStreamName=logStream,logEvents=[{'timestamp': int(time.time()*1000),'message': message}],sequenceToken=logsToken)" >> twitter-streamer.py
+            - |
+              echo "      return True" >> twitter-streamer.py
+            - |
+              echo "  feedStream = TwitListener(bearer_token=BEARER_TOKEN)" >> twitter-streamer.py
+            - |
+              echo "  feedStream.add_rules(tweepy.StreamRule(topic))" >> twitter-streamer.py
+            - |
+              echo "  feedStream.filter(tweet_fields=['attachments','author_id','created_at','entities','geo','id','in_reply_to_user_id','lang','possibly_sensitive','source','text'])" >> twitter-streamer.py
             - |
               echo "[Unit]" > /lib/systemd/system/twitter-streamer.service
             - |

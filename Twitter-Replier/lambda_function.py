@@ -10,14 +10,12 @@ CONNECT_TWITTER_CONFIG = os.environ['CONNECT_TWITTER_CONFIG']
 
 
 def lambda_handler(event, context):
+    print(event)
     STREAM_CONFIG=json.loads(get_config(CONNECT_TWITTER_CONFIG))
     access_token = STREAM_CONFIG['TWITTER_ACCESS_TOKEN']
     access_token_secret = STREAM_CONFIG['TWITTER_ACCESS_TOKEN_SECRET']
     consumer_key = STREAM_CONFIG['TWITTER_CONSUMER_KEY']
     consumer_secret = STREAM_CONFIG['TWITTER_CONSUMER_SECRET']
-    auth = tweepy.OAuthHandler(consumer_key, consumer_secret)
-    auth.set_access_token(access_token, access_token_secret)
-    
     
     tweet_id = str(event['Details']['ContactData']['Attributes']['tweet_id'])
     content = str(event['Details']['ContactData']['Description'])
@@ -25,11 +23,10 @@ def lambda_handler(event, context):
     prevcontactID = str(event['Details']['ContactData']['PreviousContactId'])
     instanceARN = str(event['Details']['ContactData']['InstanceARN'])
     instanceID = instanceARN.split(sep='/',maxsplit=2)[1]
-    
-    twitAPI = tweepy.API(auth)
 
     try:
-        response = twitAPI.update_status(status = content, in_reply_to_status_id = tweet_id , auto_populate_reply_metadata=True)
+        twitterClient = tweepy.Client(consumer_secret=consumer_secret,consumer_key=consumer_key,access_token=access_token,access_token_secret=access_token_secret)
+        twitterClient.create_tweet(in_reply_to_tweet_id=tweet_id,text=content)
         
     except Exception as e:
         print (e)

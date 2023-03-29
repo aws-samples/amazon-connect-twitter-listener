@@ -46,7 +46,7 @@ The project includes a cloud formation template with a Serverless Application Mo
 
 SAM will ask for the name of the application (name it something relevant such as "Connect-Twitter") as all resources will be grouped under it and deployment region.Reply Y on the confirmation prompt before deploying resources. SAM can save this information if you plan un doing changes, answer Y when prompted and accept the default environment and file name for the configuration.
 
-4. From the AWS Secrets Manager console, fill in the parameters in the **ConnectTwitterConfig** secret. The following parameters must be completed: **Instance ID** and **contact flow id** to handle tasks; Access Token, Access Token Secret, Consumer Key and Consumer Secret from the Twitter App; and the Twitter topic to monitor such as **#AWSRules**.
+4. From the AWS Secrets Manager console, fill in the parameters in the **ConnectTwitterConfig** secret. The following parameters must be completed: **Instance ID** and **contact flow id** to handle tasks; Bearer Token, Access Token, Access Token Secret, Consumer Key and Consumer Secret from the Twitter App; and the Twitter topic to monitor such as **#AWSRules**. Follow rules [Twitter API rules](https://developer.twitter.com/en/docs/twitter-api/tweets/filtered-stream/integrate/build-a-rule) definitions to narrow results, for example, you can use the **-is:reply** as part of the specified rule to filer out responses on tweets.
 5. Add the **Twitter-Replier** function to the Amazon Connect configuration. You can use
 ![](/imgs/add-function-connect.png)
 6. Create a new Transfer To Queue contact flow in Amazon Connect. Add a block for invoking the Twitter-Replier function. Name it TwitterReply.
